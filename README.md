@@ -1,4 +1,6 @@
-# bincloud.top 保活
+# 56idc.net 保活
+
+## 不建议github action方式，请自行Qinglong或者其他方式
 
 ### 将代码fork到你的仓库并运行的操作步骤
 
@@ -60,11 +62,11 @@
     - 示例值:
       ```json
       [
-            {"username": "bincloud.top的账号", "password": "bincloud.top的密码"},
-            {"username": "bincloud.top的账号2", "password": "bincloud.top的密码2"}
+            {"username": "56idc.net的账号", "password": "56idc.net的密码"},
+            {"username": "56idc.net的账号2", "password": "56idc.net的密码2"}
           ]
       ```
-    - 获取方法: 创建一个包含bincloud.top账号信息的 JSON 文件，并将其内容添加到 GitHub 仓库的 Secrets 中。
+    - 获取方法: 创建一个包含56idc.net账号信息的 JSON 文件，并将其内容添加到 GitHub 仓库的 Secrets 中。
 
 ### 注意事项
 
