@@ -1,0 +1,4 @@
+curl_cffi
+yescaptcha
+requests
+python-dotenv

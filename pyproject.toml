@@ -1,0 +1,11 @@
+[project]
+name = "56idc-login"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "curl_cffi",
+    "yescaptcha",
+    "requests",
+    "python-dotenv",
+]

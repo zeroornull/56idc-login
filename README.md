@@ -2,6 +2,78 @@
 
 ## 不建议github action方式，请自行Qinglong或者其他方式
 
+### 快速开始 (本地运行)
+
+#### 1. 安装依赖
+确保已安装 [uv](https://github.com/astral-sh/uv)，然后在项目目录下运行：
+```bash
+uv sync
+```
+*注：本项目使用了自定义的 `turnstile_solver.py` 来处理 CloudFreed API。*
+
+#### 2. 配置环境变量
+复制 `.env.example` 为 `.env` 并填写你的配置：
+```bash
+cp .env.example .env
+```
+在 `.env` 文件中：
+- `IDC_USERNAME`: 56idc 账号 (邮箱)
+- `IDC_PASSWORD`: 56idc 密码
+- `SOLVER_TYPE`: 验证码解决服务类型 (`turnstile` 或 `yescaptcha`)
+- `API_BASE_URL`: 服务 API 地址 (如 `https://api.capsolver.com`)
+- `CLIENT_KEY`: 你的 API Key
+- `TELEGRAM_BOT_TOKEN`: (可选) Telegram Bot Token
+- `TELEGRAM_CHAT_ID`: (可选) Telegram Chat ID
+
+#### 3. 运行脚本
+```bash
+uv run login_script.py
+```
+
+### 青龙 (Linux) 环境配置
+
+现在脚本使用 `curl_cffi` 和 Turnstile 解决服务，极大简化了在青龙等 Linux 环境下的部署。
+
+#### 1. 订阅脚本
+在青龙面板的“订阅管理”中新建订阅：
+- **名称**: 56idc 登录
+- **类型**: 公开仓库
+- **链接**: `你的仓库地址`
+- **定时**: `0 0 * * *` (每天运行一次)
+- **白名单**: `login_script.py`
+- **依赖文件**: `requirements.txt`
+
+#### 2. 配置依赖
+脚本运行需要 `curl_cffi` 等依赖。青龙会自动识别 `requirements.txt` 并尝试安装，如果安装失败，请手动在“依赖管理” -> “Python3”中添加：
+- `curl_cffi`
+- `yescaptcha`
+- `python-dotenv`
+
+#### 3. 配置环境变量
+在青龙面板的“环境变量”中添加：
+- `IDC_USERNAME`: 56idc 账号 (邮箱)
+- `IDC_PASSWORD`: 56idc 密码
+- `ACCOUNTS_JSON`: (可选) 多账号 JSON 配置，例如 `[{"username": "acc1", "password": "pwd1"}, {"username": "acc2", "password": "pwd2"}]`
+- `CLIENT_KEY`: 验证码解决服务的 API Key
+- `SOLVER_TYPE`: (可选) 默认为 `turnstile`
+- `API_BASE_URL`: (可选) 对应服务的 API 地址
+- `TELEGRAM_BOT_TOKEN`: (可选) Telegram 通知
+- `TELEGRAM_CHAT_ID`: (可选) Telegram 通知
+
+*注：脚本会自动识别青龙内置的 `notify.py` 模块。如果配置了青龙的全局通知，脚本执行结果会自动推送。*
+
+#### 4. 运行脚本
+订阅成功后，在“定时任务”中找到 `56idc 登录` 任务手动运行即可。
+### 多账号支持
+如果你有多个账号，可以在项目根目录创建 `accounts.json`：
+```json
+[
+  {"username": "user1@example.com", "password": "password1"},
+  {"username": "user2@example.com", "password": "password2"}
+]
+```
+脚本会自动合并 `.env` 中的账号和 `accounts.json` 中的账号。
+
 ### 将代码fork到你的仓库并运行的操作步骤
 
 #### 1. Fork 仓库
