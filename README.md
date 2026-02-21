@@ -54,7 +54,7 @@ uv run login_script.py
 - `IDC_USERNAME`: 56idc 账号 (邮箱)
 - `IDC_PASSWORD`: 56idc 密码
 - `IDC_USERNAME1`, `IDC_PASSWORD1`: (可选) 递增账号配置，支持 `IDC_USERNAME2`, `IDC_PASSWORD2` 等以此类推
-- `ACCOUNTS_JSON_56IDC`: (可选) 多账号 JSON 配置，例如 `[{"username": "acc1", "password": "pwd1"}, {"username": "acc2", "password": "pwd2"}]`
+- `ACCOUNTS_JSON_56IDC`: (可选) 多账号 JSON 配置，例如 `[{"username": "acc1", "password": "pwd1"}, {"username": "acc2", "password": "pwd2"}]`。注意：在某些环境中，如果作为字符串输入，请确保其为有效的 JSON 格式。脚本已增加对包裹引号的自动处理。
 - `CLIENT_KEY`: 验证码解决服务的 API Key
 - `SOLVER_TYPE`: (可选) 默认为 `turnstile`
 - `API_BASE_URL`: (可选) 对应服务的 API 地址

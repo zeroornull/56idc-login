@@ -380,8 +380,11 @@ def login_with_retry(username, password, max_retries=3):
                 error_msg = ""
                 if "failed=true" in location:
                     error_msg = " (用户名或密码错误)"
+                
+                # 修复 f-string 语法错误：不要在 f-string 中包含反斜杠
+                preview = response.text[:100].replace('\n', ' ')
                 print(
-                    f"[{serviceName}] [FAILED] 账号 {username} 登录失败{error_msg}，状态码: {response.status_code}, 响应预览: {response.text[:100].replace('\n', ' ')}")
+                    f"[{serviceName}] [FAILED] 账号 {username} 登录失败{error_msg}，状态码: {response.status_code}, 响应预览: {preview}")
 
         except Exception as e:
             print(f'{serviceName}账号 {username} 第 {retry_count + 1} 次登录尝试出错: {e}')
@@ -434,6 +437,12 @@ def main():
     # 1. 尝试从 ACCOUNTS_JSON_56IDC 读取多账号 (GitHub Secrets 或 青龙)
     env_accounts_json = os.getenv('ACCOUNTS_JSON_56IDC')
     if env_accounts_json:
+        env_accounts_json = env_accounts_json.strip()
+        # 容错处理：如果字符串被单引号或双引号包裹，则去掉它们
+        if (env_accounts_json.startswith("'") and env_accounts_json.endswith("'")) or \
+           (env_accounts_json.startswith('"') and env_accounts_json.endswith('"')):
+            env_accounts_json = env_accounts_json[1:-1].strip()
+            
         try:
             json_accounts = json.loads(env_accounts_json)
             if isinstance(json_accounts, list):
@@ -443,6 +452,7 @@ def main():
                 print(f"从环境变量 ACCOUNTS_JSON_56IDC 加载了 {len(json_accounts)} 个账号")
         except Exception as e:
             print(f'解析环境变量 ACCOUNTS_JSON_56IDC 出错: {e}')
+            print(f'原始值: {env_accounts_json[:100]}...')
 
     # 2. 尝试读取 IDC_USERNAME / IDC_PASSWORD (单账号)
     user = os.getenv("IDC_USERNAME")
