@@ -20,10 +20,49 @@ cp .env.example .env
 - `IDC_USERNAME`: 56idc 账号 (邮箱)
 - `IDC_PASSWORD`: 56idc 密码
 - `SOLVER_TYPE`: 验证码解决服务类型 (`turnstile` 或 `yescaptcha`)
-- `API_BASE_URL`: 服务 API 地址 (如 `https://api.capsolver.com`)
+- `API_BASE_URL`: 服务 API 地址 (如 `https://api.capsolver.com` 或 `https://api.yescaptcha.com`)
 - `CLIENT_KEY`: 你的 API Key
-- `TELEGRAM_BOT_TOKEN`: (可选) Telegram Bot Token
-- `TELEGRAM_CHAT_ID`: (可选) Telegram Chat ID
+- `TG_BOT_TOKEN`: (可选) Telegram Bot Token
+- `TG_USER_ID`: (可选) Telegram Chat ID
+- `PUSH_PLUS_TOKEN`: (可选) push+ 微信推送令牌
+- `DD_BOT_TOKEN`, `DD_BOT_SECRET`: (可选) 钉钉机器人推送
+- `FSKEY`: (可选) 飞书机器人推送
+- `BARK_PUSH`: (可选) Bark 推送
+- (其他支持的通知方式请查看 `notify.py`)
+
+### YesCaptcha 商业服务
+
+1. 访问 [YesCaptcha](https://yescaptcha.com/i/Kuc27w) 注册账号
+2. 注册后联系客服可免费获得余额（约可使用60次登录）
+3. 配置以下环境变量：
+
+| 变量名称 | 说明 |
+| :------: | :--- |
+| `CLIENT_KEY` | YesCaptcha 的 API 密钥 |
+| `IDC_USERNAME` | 56idc 论坛用户名 (或 `USER1`/`USER2`...) |
+| `IDC_PASSWORD` | 56idc 论坛密码 (或 `PASS1`/`PASS2`...) |
+| `SOLVER_TYPE` | 设置为 `yescaptcha` |
+
+> **提示**：YesCaptcha 提供两个服务节点，可根据网络情况选择：
+> - 国际节点：`https://api.yescaptcha.com`（默认）
+> - 国内节点：`https://cn.yescaptcha.com`
+
+### CloudFreed (Docker) 配置方式
+
+CloudFreed 提供了一种通过 Docker 部署的 Turnstile 解决服务。你可以按照以下步骤进行配置：
+
+#### 1. Docker 启动
+如果你有自己的服务器，可以使用 Docker 运行：
+```bash
+docker run -it --rm -p 3000:3000 jackzzs/cloudflyer -K YOUR_CLIENT_KEY
+```
+*注：具体镜像名和参数请参考 https://github.com/cloudflyer-project/cloudflyer-oss 官方文档。*
+
+#### 2. 配置 Key
+启动后，在本项目中配置：
+- `SOLVER_TYPE`: `turnstile`
+- `API_BASE_URL`: `http://你的服务器IP:3000`
+- `CLIENT_KEY`: 你在 Docker 启动时设置的 `API_KEY`
 
 #### 3. 运行脚本
 ```bash
@@ -58,8 +97,13 @@ uv run login_script.py
 - `CLIENT_KEY`: 验证码解决服务的 API Key
 - `SOLVER_TYPE`: (可选) 默认为 `turnstile`
 - `API_BASE_URL`: (可选) 对应服务的 API 地址
-- `TELEGRAM_BOT_TOKEN`: (可选) Telegram 通知
-- `TELEGRAM_CHAT_ID`: (可选) Telegram 通知
+- `TG_BOT_TOKEN`: (可选) Telegram 通知
+- `TG_USER_ID`: (可选) Telegram 通知
+- `PUSH_PLUS_TOKEN`: (可选) push+ 微信推送令牌
+- `DD_BOT_TOKEN`, `DD_BOT_SECRET`: (可选) 钉钉机器人推送
+- `FSKEY`: (可选) 飞书机器人推送
+- `BARK_PUSH`: (可选) Bark 推送
+- (其他支持的通知方式请查看 `notify.py`)
 
 **进阶配置 (自动保存变量):**
 如果需要在脚本中自动更新/保存环境变量 (目前主要用于支持环境检测和同步):
@@ -99,8 +143,8 @@ uv run login_script.py
 
 2. **配置 GitHub Secrets**
     - 转到你 fork 的仓库页面。
-    - 点击 `Settings`，然后在左侧菜单中选择 `Secrets`。
-    - 添加以下 Secrets：
+    - 点击 `Settings`，然后在左侧菜单中选择 `Secrets and variables` -> `Actions`。
+    - 在 `Secrets` 选项卡下添加以下 Secrets：
         - `ACCOUNTS_JSON_56IDC`: 包含账号信息的 JSON 数据。例如：
         - 
           ```json
@@ -109,8 +153,19 @@ uv run login_script.py
             {"username": "acc2", "password": "pwd"}
           ]
           ```
-        - `TELEGRAM_BOT_TOKEN`: 你的 Telegram Bot 的 API Token。
-        - `TELEGRAM_CHAT_ID`: 你的 Telegram Chat ID。
+        - `IDC_USERNAME`: (可选) 单账号用户名
+        - `IDC_PASSWORD`: (可选) 单账号密码
+        - `CLIENT_KEY`: 验证码服务的 API Key
+        - `TG_BOT_TOKEN`: (可选) 你的 Telegram Bot 的 API Token。
+        - `TG_USER_ID`: (可选) 你的 Telegram Chat ID。
+        - `PUSH_PLUS_TOKEN`: (可选) Push+ 微信推送令牌
+        - `DD_BOT_TOKEN`: (可选) 钉钉机器人 Token
+        - `DD_BOT_SECRET`: (可选) 钉钉机器人 Secret
+        - `FSKEY`: (可选) 飞书机器人 Key
+        - `BARK_PUSH`: (可选) Bark 推送 (iOS)
+        - `QYWX_KEY`: (可选) 企业微信机器人 Key
+        - `DEER_KEY`: (可选) PushDeer Key
+        - (更多通知变量请参考 `notify.py`)
 
     - **获取方法**：
         - 在 Telegram 中创建 Bot，并获取 API Token 和 Chat ID。
@@ -128,11 +183,11 @@ uv run login_script.py
 
 #### 示例 Secrets 和获取方法总结
 
-- **TELEGRAM_BOT_TOKEN**
+- **TG_BOT_TOKEN**
     - 示例值: `1234567890:ABCDEFghijklmnopQRSTuvwxyZ`
-    - 获取方法: 在 Telegram 中使用 `@BotFather` 创建 Bot 并获取 API Token。
+    - 获取方法: 在 Telegram 中使用 `@BotFather` 创建 Bot 并获取 API Token单位。
 
-- **TELEGRAM_CHAT_ID**
+- **TG_USER_ID**
     - 示例值: `1234567890`
     - 获取方法: 发送一条消息给你的 Bot，然后访问 `https://api.telegram.org/bot<your_bot_token>/getUpdates` 获取 Chat ID。
 

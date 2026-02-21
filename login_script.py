@@ -28,14 +28,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 从环境变量中获取 Telegram Bot Token 和 Chat ID
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN') or os.getenv('TELEGRAM_BOT_TOKEN')
+TG_USER_ID = os.getenv('TG_USER_ID') or os.getenv('TELEGRAM_CHAT_ID')
 
 # 56idc Turnstile 配置
 SITE_KEY = "0x4AAAAAACCEZfX2OxZ4g1Ac"
 SITE_URL = "https://56idc.net/login"
 
-# ---------------- 通知模块动态加载 (支持青龙 notify.py) ----------------
+# ---------------- 通知模块动态加载 (支持本地 notify.py) ----------------
 hadsend = False
 send = None
 try:
@@ -410,10 +410,10 @@ def send_notification(message):
             print(f"通过 notify.py 发送通知失败: {e}")
 
     # 备选：使用内置的 Telegram 发送
-    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    if TG_BOT_TOKEN and TG_USER_ID:
+        url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
         payload = {
-            'chat_id': TELEGRAM_CHAT_ID,
+            'chat_id': TG_USER_ID,
             'text': message
         }
         try:
