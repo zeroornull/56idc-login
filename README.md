@@ -53,12 +53,18 @@ uv run login_script.py
 在青龙面板的“环境变量”中添加：
 - `IDC_USERNAME`: 56idc 账号 (邮箱)
 - `IDC_PASSWORD`: 56idc 密码
-- `ACCOUNTS_JSON`: (可选) 多账号 JSON 配置，例如 `[{"username": "acc1", "password": "pwd1"}, {"username": "acc2", "password": "pwd2"}]`
+- `IDC_USERNAME1`, `IDC_PASSWORD1`: (可选) 递增账号配置，支持 `IDC_USERNAME2`, `IDC_PASSWORD2` 等以此类推
+- `ACCOUNTS_JSON_56IDC`: (可选) 多账号 JSON 配置，例如 `[{"username": "acc1", "password": "pwd1"}, {"username": "acc2", "password": "pwd2"}]`
 - `CLIENT_KEY`: 验证码解决服务的 API Key
 - `SOLVER_TYPE`: (可选) 默认为 `turnstile`
 - `API_BASE_URL`: (可选) 对应服务的 API 地址
 - `TELEGRAM_BOT_TOKEN`: (可选) Telegram 通知
 - `TELEGRAM_CHAT_ID`: (可选) Telegram 通知
+
+**进阶配置 (自动保存变量):**
+如果需要在脚本中自动更新/保存环境变量 (目前主要用于支持环境检测和同步):
+- 青龙环境: 配置 `QL_CLIENT_ID`, `QL_CLIENT_SECRET`, `QL_API_URL` (默认 http://localhost:5700)
+- GitHub 环境: 配置 `GH_PAT` (Personal Access Token) 和 `GITHUB_REPOSITORY`
 
 *注：脚本会自动识别青龙内置的 `notify.py` 模块。如果配置了青龙的全局通知，脚本执行结果会自动推送。*
 
@@ -95,7 +101,7 @@ uv run login_script.py
     - 转到你 fork 的仓库页面。
     - 点击 `Settings`，然后在左侧菜单中选择 `Secrets`。
     - 添加以下 Secrets：
-        - `ACCOUNTS_JSON`: 包含账号信息的 JSON 数据。例如：
+        - `ACCOUNTS_JSON_56IDC`: 包含账号信息的 JSON 数据。例如：
         - 
           ```json
           [
@@ -130,7 +136,7 @@ uv run login_script.py
     - 示例值: `1234567890`
     - 获取方法: 发送一条消息给你的 Bot，然后访问 `https://api.telegram.org/bot<your_bot_token>/getUpdates` 获取 Chat ID。
 
-- **ACCOUNTS_JSON**
+- **ACCOUNTS_JSON_56IDC**
     - 示例值:
       ```json
       [

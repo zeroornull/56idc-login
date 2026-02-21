@@ -45,6 +45,208 @@ try:
 except ImportError:
     print("未加载本地通知模块 (notify.py)，将使用内置的 Telegram 通知")
 
+# ---------------- 环境检测函数 ----------------
+def detect_environment():
+    """检测当前运行环境"""
+    # 优先检测是否在 Docker 环境中
+    if os.environ.get("IN_DOCKER") == "true":
+        return "docker"
+
+    # 检测是否在青龙环境中
+    ql_path_markers = ['/ql/data/', '/ql/config/', '/ql/', '/.ql/']
+    in_ql_env = False
+
+    for path in ql_path_markers:
+        if os.path.exists(path):
+            in_ql_env = True
+            break
+
+    # 检测是否在GitHub Actions环境中
+    in_github_env = os.environ.get("GITHUB_ACTIONS") == "true" or (os.environ.get("GH_PAT") and os.environ.get("GITHUB_REPOSITORY"))
+
+    if in_ql_env:
+        return "qinglong"
+    elif in_github_env:
+        return "github"
+    else:
+        return "unknown"
+
+
+# ---------------- GitHub 变量写入函数 ----------------
+def save_cookie_to_github_var(var_name: str, value: str):
+    import requests as py_requests
+    token = os.environ.get("GH_PAT")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not token or not repo:
+        print("GH_PAT 或 GITHUB_REPOSITORY 未设置，跳过GitHub变量更新")
+        return False
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json"
+    }
+
+    url_check = f"https://api.github.com/repos/{repo}/actions/variables/{var_name}"
+    url_create = f"https://api.github.com/repos/{repo}/actions/variables"
+
+    data = {"name": var_name, "value": value}
+
+    try:
+        response = py_requests.patch(url_check, headers=headers, json=data)
+        if response.status_code == 204:
+            print(f"GitHub: {var_name} 更新成功")
+            return True
+        elif response.status_code == 404:
+            print(f"GitHub: {var_name} 不存在，尝试创建...")
+            response = py_requests.post(url_create, headers=headers, json=data)
+            if response.status_code == 201:
+                print(f"GitHub: {var_name} 创建成功")
+                return True
+            else:
+                print(f"GitHub创建失败: {response.status_code}, {response.text}")
+                return False
+        else:
+            print(f"GitHub设置失败: {response.status_code}, {response.text}")
+            return False
+    except Exception as e:
+        print(f"GitHub变量更新异常: {e}")
+        return False
+
+
+# ---------------- 青龙面板 API 交互类 ----------------
+class QLAPI:
+    @staticmethod
+    def get_token():
+        # 青龙脚本内部可以直接通过 /ql/config/auth.json 或环境变量获取，
+        # 但如果是脚本内部运行，通常可以直接调用 notify.py 或使用已经注入的 API。
+        # 这里为了简化，假设使用的是环境变量中已有的权限，或者通过特定的 QL API 库。
+        # 实际上在青龙容器内运行脚本时，通常难以直接通过 python 代码修改环境变量并持久化，
+        # 除非调用青龙暴露的 HTTP API。
+        pass
+
+    @staticmethod
+    def _get_ql_config():
+        auth_path = '/ql/config/auth.json'
+        if os.path.exists(auth_path):
+            with open(auth_path, 'r') as f:
+                return json.load(f)
+        return None
+
+    @staticmethod
+    def _get_ql_api_call(method, endpoint, data=None, params=None):
+        # 尝试从环境变量获取青龙 API 信息
+        # 青龙通常不直接暴露本地 API 给脚本，除非配置了 Client ID/Secret
+        client_id = os.environ.get("QL_CLIENT_ID")
+        client_secret = os.environ.get("QL_CLIENT_SECRET")
+        base_url = os.environ.get("QL_API_URL", "http://localhost:5700")
+
+        if not client_id or not client_secret:
+            return {"code": 401, "message": "未配置 QL_CLIENT_ID 或 QL_CLIENT_SECRET"}
+
+        import requests as py_requests
+        # 1. 获取 token
+        token_url = f"{base_url}/open/auth/token?client_id={client_id}&client_secret={client_secret}"
+        try:
+            token_resp = py_requests.get(token_url).json()
+            if token_resp.get("code") != 200:
+                return token_resp
+            token = token_resp["data"]["token"]
+        except Exception as e:
+            return {"code": 500, "message": f"获取 QL Token 失败: {e}"}
+
+        # 2. 调用 API
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        url = f"{base_url}/open/{endpoint}"
+        try:
+            if method.upper() == "GET":
+                resp = py_requests.get(url, headers=headers, params=params)
+            elif method.upper() == "POST":
+                resp = py_requests.post(url, headers=headers, json=data)
+            elif method.upper() == "PUT":
+                resp = py_requests.put(url, headers=headers, json=data)
+            elif method.upper() == "DELETE":
+                resp = py_requests.delete(url, headers=headers, json=data)
+            elif method.upper() == "PATCH":
+                resp = py_requests.patch(url, headers=headers, json=data)
+            else:
+                return {"code": 405, "message": "不支持的方法"}
+            return resp.json()
+        except Exception as e:
+            return {"code": 500, "message": f"调用 QL API 失败: {e}"}
+
+
+def delete_ql_env(var_name: str):
+    """删除青龙面板中的指定环境变量"""
+    try:
+        print(f"查询要删除的环境变量: {var_name}")
+        env_result = QLAPI._get_ql_api_call("GET", "envs", params={"searchValue": var_name})
+
+        env_ids = []
+        if env_result.get("code") == 200 and env_result.get("data"):
+            for env in env_result.get("data"):
+                if env.get("name") == var_name:
+                    env_ids.append(env.get("id"))
+
+        if env_ids:
+            print(f"找到 {len(env_ids)} 个环境变量需要删除: {env_ids}")
+            delete_result = QLAPI._get_ql_api_call("DELETE", "envs", data=env_ids)
+            if delete_result.get("code") == 200:
+                print(f"成功删除环境变量: {var_name}")
+                return True
+            else:
+                print(f"删除环境变量失败: {delete_result}")
+                return False
+        else:
+            print(f"未找到环境变量: {var_name}")
+            return True
+    except Exception as e:
+        print(f"删除环境变量异常: {str(e)}")
+        return False
+
+
+def save_env_to_ql(var_name: str, value: str):
+    """保存环境变量到青龙面板"""
+    try:
+        delete_result = delete_ql_env(var_name)
+        if not delete_result:
+            print("删除已有变量失败，但仍将尝试创建新变量")
+
+        create_data = [
+            {
+                "name": var_name,
+                "value": value,
+                "remarks": "56idc登录脚本自动创建"
+            }
+        ]
+
+        create_result = QLAPI._get_ql_api_call("POST", "envs", data=create_data)
+        if create_result.get("code") == 200:
+            print(f"青龙面板环境变量 {var_name} 创建成功")
+            return True
+        else:
+            print(f"青龙面板环境变量创建失败: {create_result}")
+            return False
+    except Exception as e:
+        print(f"青龙面板环境变量操作异常: {str(e)}")
+        return False
+
+
+# ---------------- 统一变量保存函数 ----------------
+def save_variable(var_name: str, value: str):
+    """根据当前环境保存变量到相应位置"""
+    env_type = detect_environment()
+
+    if env_type == "qinglong":
+        print("检测到青龙环境，尝试通过 API 更新环境变量...")
+        return save_env_to_ql(var_name, value)
+    elif env_type == "github":
+        print("检测到GitHub环境，尝试保存变量到GitHub Actions Variables...")
+        return save_cookie_to_github_var(var_name, value)
+    else:
+        print("未检测到支持远程保存的环境或配置不足，跳过变量自动保存")
+        return False
+
+
 def _get_env_str(name: str, default: str = "") -> str:
     """读取环境变量并去掉空白；若为空字符串则回退 default。"""
     v = os.getenv(name)
@@ -228,7 +430,8 @@ def main():
     message = '56idc 自动化脚本运行 (Requests 版)\n'
 
     accounts = []
-    # 1. 优先从环境变量 ACCOUNTS_JSON 读取多账号 (适合 GitHub Secrets 或青龙)
+
+    # 1. 尝试从 ACCOUNTS_JSON_56IDC 读取多账号 (GitHub Secrets 或 青龙)
     env_accounts_json = os.getenv('ACCOUNTS_JSON_56IDC')
     if env_accounts_json:
         try:
@@ -237,34 +440,47 @@ def main():
                 for acc in json_accounts:
                     if 'username' in acc and 'password' in acc:
                         accounts.append(acc)
-                print(f"从环境变量 ACCOUNTS_JSON 加载了 {len(json_accounts)} 个账号")
+                print(f"从环境变量 ACCOUNTS_JSON_56IDC 加载了 {len(json_accounts)} 个账号")
         except Exception as e:
-            print(f'解析环境变量 ACCOUNTS_JSON 出错: {e}')
+            print(f'解析环境变量 ACCOUNTS_JSON_56IDC 出错: {e}')
 
-    # 2. 从环境变量读取单账号
-    env_username = os.getenv('IDC_USERNAME')
-    env_password = os.getenv('IDC_PASSWORD')
+    # 2. 尝试读取 IDC_USERNAME / IDC_PASSWORD (单账号)
+    user = os.getenv("IDC_USERNAME")
+    password = os.getenv("IDC_PASSWORD")
+    if user and password:
+        if not any(a['username'] == user for a in accounts):
+            accounts.append({"username": user, "password": password})
 
-    if env_username and env_password:
-        # 避免重复添加
-        if not any(a['username'] == env_username for a in accounts):
-            accounts.append({'username': env_username, 'password': env_password})
+    # 3. 尝试读取 IDC_USERNAME1, IDC_PASSWORD1, IDC_USERNAME2... (递增账号)
+    index = 1
+    while True:
+        user = os.getenv(f"IDC_USERNAME{index}")
+        password = os.getenv(f"IDC_PASSWORD{index}")
+        if user and password:
+            if not any(a['username'] == user for a in accounts):
+                accounts.append({"username": user, "password": password})
+            index += 1
+        else:
+            break
 
-    # 3. 如果有 accounts.json，也合并进来
+    # 4. 如果有 accounts.json，也合并进来
     if os.path.exists('accounts.json'):
         try:
             with open('accounts.json', 'r', encoding='utf-8') as f:
                 json_accounts = json.load(f)
-                for acc in json_accounts:
-                    if not any(a['username'] == acc['username'] for a in accounts):
-                        accounts.append(acc)
+                if isinstance(json_accounts, list):
+                    for acc in json_accounts:
+                        if 'username' in acc and 'password' in acc:
+                            if not any(a['username'] == acc['username'] for a in accounts):
+                                accounts.append(acc)
         except Exception as e:
             print(f'读取 accounts.json 文件时出错: {e}')
 
     if not accounts:
-        print("未发现账号信息，请在 .env (IDC_USERNAME/PASSWORD 或 ACCOUNTS_JSON) 或 accounts.json 中配置")
+        print("未发现账号信息，请在环境变量 (IDC_USERNAME/PASSWORD, IDC_USERNAME1/PASSWORD1, ACCOUNTS_JSON_56IDC) 或 accounts.json 中配置")
         return
 
+    print(f"当前运行环境: {detect_environment()}")
     print(f"共发现 {len(accounts)} 个账号，开始执行...")
 
     # 登录所有账号
