@@ -8,4 +8,5 @@ dependencies = [
     "yescaptcha",
     "requests",
     "python-dotenv",
+    "ddddocr>=1.6.1",
 ]

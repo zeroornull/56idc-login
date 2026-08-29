@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 
+import io
 import json
 import os
 import random
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
 from curl_cffi import requests
+from PIL import Image, ImageOps
 
 from yescaptcha import YesCaptchaSolver
 
@@ -31,9 +34,15 @@ load_dotenv()
 TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN') or os.getenv('TELEGRAM_BOT_TOKEN')
 TG_USER_ID = os.getenv('TG_USER_ID') or os.getenv('TELEGRAM_CHAT_ID')
 
-# 56idc Turnstile 配置
+# 56idc 登录页配置（站点已从 Turnstile 改回 WHMCS 图片验证码）
 SITE_KEY = "0x4AAAAAACCEZfX2OxZ4g1Ac"
 SITE_URL = "https://56idc.net/login"
+VERIFY_IMAGE_URL = "https://56idc.net/includes/verifyimage.php"
+CLIENTAREA_URL = "https://56idc.net/clientarea.php"
+LOGOUT_URL = "https://56idc.net/logout.php"
+IMPERSONATE = "chrome"
+
+_ocr = None
 
 # ---------------- 通知模块动态加载 (支持本地 notify.py) ----------------
 hadsend = False
@@ -261,7 +270,97 @@ def format_to_iso(date):
     return date.strftime('%Y-%m-%d %H:%M:%S')
 
 
-def solve_turnstile():
+def _get_ocr():
+    global _ocr
+    if _ocr is None:
+        import ddddocr
+        _ocr = ddddocr.DdddOcr(show_ad=False)
+    return _ocr
+
+
+def _extract_csrf_token(html: str) -> str:
+    m = re.search(r'name="token"\s+value="([^"]+)"', html)
+    if m:
+        return m.group(1)
+    m = re.search(r'value="([^"]+)"\s+name="token"', html)
+    return m.group(1) if m else ""
+
+
+def _detect_captcha_kind(html: str) -> str:
+    lowered = html.lower()
+    if "verifyimage.php" in lowered or 'id="inputcaptcha"' in lowered or 'name="code"' in lowered:
+        return "image"
+    if "cf-turnstile" in lowered or "challenges.cloudflare.com/turnstile" in lowered:
+        return "turnstile"
+    return "none"
+
+
+def _extract_sitekey(html: str) -> str:
+    m = re.search(r'data-sitekey="([^"]+)"', html, re.I)
+    return m.group(1) if m else SITE_KEY
+
+
+def _extract_captcha_image_url(html: str) -> str:
+    m = re.search(r'id="inputCaptchaImage"[^>]*src="([^"]+)"', html)
+    if not m:
+        m = re.search(r'src="([^"]*verifyimage\.php[^"]*)"', html, re.I)
+    url = m.group(1) if m else VERIFY_IMAGE_URL
+    if url.startswith("//"):
+        return "https:" + url
+    if url.startswith("/"):
+        return "https://56idc.net" + url
+    return url
+
+
+def _extract_login_action(html: str) -> str:
+    m = re.search(r'<form[^>]*class="[^"]*login-form[^"]*"[^>]*action="([^"]*)"', html, re.I)
+    if not m:
+        m = re.search(r'<form[^>]*action="([^"]*)"[^>]*class="[^"]*login-form', html, re.I)
+    action = (m.group(1) if m else "/login") or "/login"
+    if action == "#":
+        return SITE_URL
+    if action.startswith("//"):
+        return "https:" + action
+    if action.startswith("/"):
+        return "https://56idc.net" + action
+    if action.startswith("http"):
+        return action
+    return SITE_URL
+
+
+def _extract_alert(html: str) -> str:
+    parts = []
+    for m in re.finditer(r'<div[^>]*class="[^"]*alert[^"]*"[^>]*>(.*?)</div>', html, re.I | re.S):
+        text = re.sub(r"<[^>]+>", " ", m.group(1))
+        text = re.sub(r"\s+", " ", text).strip()
+        if text:
+            parts.append(text)
+    return " | ".join(parts[:2])
+
+
+def _normalize_captcha_text(text: str) -> str:
+    return "".join(c for c in (text or "").upper() if c.isalnum())
+
+
+def recognize_image_captcha(image_bytes: bytes) -> str:
+    """识别 WHMCS 图片验证码。灰度 + 反色各识别一次，优先取 6/5 位结果。"""
+    ocr = _get_ocr()
+    image = Image.open(io.BytesIO(image_bytes)).convert("L")
+    candidates = []
+    for variant in (image, ImageOps.invert(image)):
+        buf = io.BytesIO()
+        variant.save(buf, format="PNG")
+        text = _normalize_captcha_text(ocr.classification(buf.getvalue()))
+        if text and text not in candidates:
+            candidates.append(text)
+    for length in (6, 5):
+        for text in candidates:
+            if len(text) == length:
+                return text
+    return candidates[0] if candidates else ""
+
+
+def solve_turnstile(sitekey=None):
     solver_type = _get_env_str("SOLVER_TYPE", "turnstile")
     api_base_url = _get_env_str("API_BASE_URL", "")
     client_key = _get_env_str("CLIENT_KEY", "")
@@ -286,7 +385,7 @@ def solve_turnstile():
 
         token = solver.solve(
             url=SITE_URL,
-            sitekey=SITE_KEY,
+            sitekey=sitekey or SITE_KEY,
             verbose=True
         )
         return token
@@ -295,94 +394,103 @@ def solve_turnstile():
         return None
 
 
-def login_with_retry(username, password, max_retries=3):
+def login_with_retry(username, password, max_retries=5):
     """执行登录操作，包含重试逻辑"""
     serviceName = '56idc'
     retry_count = 0
+    headers = {
+        'origin': "https://56idc.net",
+        'referer': SITE_URL,
+        'accept': "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        'content-type': "application/x-www-form-urlencoded"
+    }
 
     while retry_count < max_retries:
         try:
             print(f"账号 {username} 第 {retry_count + 1} 次尝试登录...")
 
-            token = solve_turnstile()
-            if not token:
-                print("验证码解析失败，跳过本次尝试")
+            session = requests.Session(impersonate=IMPERSONATE)
+            resp = session.get(SITE_URL, timeout=30)
+            if resp.status_code != 200:
+                print(f"[{serviceName}] 登录页请求失败，状态码: {resp.status_code}")
                 retry_count += 1
                 continue
 
-            session = requests.Session(impersonate="chrome110")
-
-            # 访问登录页获取初始 cookies 和 CSRF token
-            resp = session.get(SITE_URL)
-
-            # 尝试提取隐藏的 CSRF token
-            from re import search
-            csrf_match = search(r'input type="hidden" name="token" value="([^"]+)"', resp.text)
-            csrf_token = csrf_match.group(1) if csrf_match else ""
-
-            if not csrf_token:
-                # 尝试另一种匹配方式
-                csrf_match = search(r'name="token" value="([^"]+)"', resp.text)
-                csrf_token = csrf_match.group(1) if csrf_match else ""
-
-            # 等待一会，模拟真人行为
-            time.sleep(random.uniform(1, 3))
+            html = resp.text
+            csrf_token = _extract_csrf_token(html)
+            captcha_kind = _detect_captcha_kind(html)
+            post_url = _extract_login_action(html)
+            print(f"[{serviceName}] CSRF={'有' if csrf_token else '无'} 验证码类型={captcha_kind}")
 
             data = {
                 "token": csrf_token,
                 "username": username,
                 "password": password,
-                "cf-turnstile-response": token,
                 "rememberme": "on"
             }
 
-            headers = {
-                'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-                'origin': "https://56idc.net",
-                'referer': SITE_URL,
-                'accept': "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                'content-type': "application/x-www-form-urlencoded"
-            }
+            if captcha_kind == "image":
+                img_url = _extract_captcha_image_url(html)
+                img_resp = session.get(img_url, timeout=20)
+                if img_resp.status_code != 200 or not img_resp.content:
+                    print(f"[{serviceName}] 验证码图片获取失败: {img_resp.status_code}")
+                    retry_count += 1
+                    continue
+                code = recognize_image_captcha(img_resp.content)
+                if len(code) < 4:
+                    print(f"[{serviceName}] 图片验证码识别失败或过短: {code!r}")
+                    retry_count += 1
+                    continue
+                print(f"[{serviceName}] 识别验证码: {code}")
+                data["code"] = code
+            elif captcha_kind == "turnstile":
+                token = solve_turnstile(sitekey=_extract_sitekey(html))
+                if not token:
+                    print("验证码解析失败，跳过本次尝试")
+                    retry_count += 1
+                    continue
+                data["cf-turnstile-response"] = token
+            else:
+                print(f"[{serviceName}] 未检测到验证码，尝试直接登录")
 
-            # 56idc 的登录接口通常直接 POST 到登录页
-            # 使用 allow_redirects=False 以便捕捉 302 跳转
-            response = session.post(SITE_URL, data=data, headers=headers, allow_redirects=False)
+            time.sleep(random.uniform(0.8, 1.8))
+            response = session.post(
+                post_url, data=data, headers=headers, allow_redirects=False, timeout=30
+            )
 
-            # 打印详细登录响应日志
+            location = response.headers.get("Location", "") or ""
             print(f"[{serviceName}] 登录响应状态码: {response.status_code}")
-            if response.status_code == 302:
-                print(f"[{serviceName}] 登录重定向地址: {response.headers.get('Location')}")
+            if location:
+                print(f"[{serviceName}] 登录重定向地址: {location}")
 
-            # 检查是否登录成功
-            # 56idc (WHMCS) 成功后通常会 302 跳转到 clientarea.php
+            loc_l = location.lower()
             is_success = False
-            location = response.headers.get("Location", "")
-            if response.status_code == 302 and ("clientarea.php" in location or "index.php" in location):
+            if response.status_code in (301, 302, 303, 307, 308):
+                if "login" in loc_l and ("incorrect" in loc_l or "failed" in loc_l):
+                    print(f"[{serviceName}] 重定向回登录页，可能用户名/密码或验证码错误")
+                elif "login" not in loc_l:
+                    is_success = True
+                    print(f"[{serviceName}] 检测到成功重定向至: {location}")
+            elif "Logout" in response.text or "注销" in response.text:
                 is_success = True
-                print(f"[{serviceName}] 检测到成功重定向至: {location}")
-            elif "Logout" in response.text or "注销" in response.text or "clientarea.php" in response.text:
-                is_success = True
-                print(f"[{serviceName}] 响应内容中检测到登录成功标识 (如 'Logout' 或 'clientarea.php')")
+                print(f"[{serviceName}] 响应内容中检测到登录成功标识")
 
             if is_success:
-                # 进一步验证登录状态
                 print(f"[{serviceName}] 正在进一步验证登录状态...")
-                verify_resp = session.get("https://56idc.net/clientarea.php")
+                verify_resp = session.get(CLIENTAREA_URL, timeout=30)
                 if "Logout" in verify_resp.text or "注销" in verify_resp.text:
                     print(f"[{serviceName}] [SUCCESS] 账号 {username} 成功进入会员中心！")
-                    # 访问注销 URL (保持原脚本逻辑)
-                    session.get('https://56idc.net/logout.php')
+                    session.get(LOGOUT_URL, timeout=20)
                     return True
-                else:
-                    print(f"[{serviceName}] [FAILED] 虽然检测到重定向，但进入会员中心失败，可能会话无效")
+                print(f"[{serviceName}] [FAILED] 虽然检测到重定向，但进入会员中心失败，可能会话无效")
             else:
-                # 如果没成功，可能重定向回 login.php?failed=true，检查一下
                 error_msg = ""
-                if "failed=true" in location:
-                    error_msg = " (用户名或密码错误)"
-                
-                # 修复 f-string 语法错误：不要在 f-string 中包含反斜杠
-                preview = response.text[:100].replace('\n', ' ')
+                if "failed=true" in loc_l or "incorrect" in loc_l:
+                    error_msg = " (用户名、密码或验证码错误)"
+                alert = _extract_alert(response.text)
+                if alert:
+                    error_msg += f" 页面提示: {alert}"
+                preview = response.text[:120].replace('\n', ' ')
                 print(
                     f"[{serviceName}] [FAILED] 账号 {username} 登录失败{error_msg}，状态码: {response.status_code}, 响应预览: {preview}")
 
@@ -391,7 +499,7 @@ def login_with_retry(username, password, max_retries=3):
 
         retry_count += 1
         if retry_count < max_retries:
-            delay = random.randint(5, 10)
+            delay = random.randint(3, 8)
             print(f"等待 {delay} 秒后重试...")
             time.sleep(delay)
 
